@@ -1,0 +1,32 @@
+{
+  "_comment": "Copy to categories.local.json (git-ignored) and edit. Patterns are case-insensitive Python regular expressions; \\b marks a word boundary.",
+  "categories": {
+    "Travel / trips": {
+      "weight": 3,
+      "patterns": ["\\bflight", "\\bairport\\b", "\\bhotel\\b", "\\bairbnb\\b", "\\bvacation\\b", "\\btrip\\b"]
+    },
+    "Money / payments": {
+      "weight": 3,
+      "patterns": ["\\bvenmo\\b", "\\bzelle\\b", "\\bpaid\\b", "\\bpay (you|me) back\\b", "\\binvoice\\b", "\\$\\d+"]
+    },
+    "Health / appointments": {
+      "weight": 4,
+      "patterns": ["\\bdoctor\\b", "\\bappointment\\b", "\\bhospital\\b", "\\bprescription\\b", "\\ber\\b"]
+    },
+    "Home / property": {
+      "weight": 2,
+      "patterns": ["\\blease\\b", "\\brent\\b", "\\blandlord\\b", "\\brealtor\\b", "\\bmortgage\\b"]
+    },
+    "Plans / scheduling": {
+      "weight": 1,
+      "patterns": ["\\btomorrow\\b", "\\btonight\\b", "\\bthis weekend\\b", "\\bwhat time\\b"]
+    }
+  },
+  "overlap_bonus": { "2": 3, "3": 5, "5": 8 },
+  "combos": [
+    { "all": ["Travel / trips", "Money / payments"], "bonus": 6 },
+    { "all": ["Health / appointments"], "any": ["Plans / scheduling"], "bonus": 4 }
+  ],
+  "low_signal_only": ["Plans / scheduling"],
+  "low_signal_penalty": 5
+}

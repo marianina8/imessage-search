@@ -1,0 +1,5 @@
+# Installed automatically by "Start iMessage Search.command".
+# More reliable decoding of messages stored in attributedBody:
+pytypedstream>=0.1
+# Reading encrypted iPhone backups:
+iphone_backup_decrypt>=0.9

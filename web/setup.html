@@ -1,0 +1,440 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set Up Message Search</title>
+<style>
+:root {
+  --bg: #f5f5f3; --panel: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #e3e3e0;
+  --accent: #2f6fdf; --accent-text: #fff; --soft: #eef3fd; --ok: #1f7a3a; --ok-soft: #e6f4ea;
+  --warn: #8a5a00; --warn-soft: #fff4dc; --danger: #b3261e; --danger-soft: #fdecea;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151516; --panel: #1f1f21; --text: #ececee; --muted: #9a9aa0; --line: #333336;
+    --accent: #6d9cff; --accent-text: #0b1020; --soft: #1c2740; --ok: #6fd08c; --ok-soft: #173222;
+    --warn: #f0c060; --warn-soft: #3a2f14; --danger: #ff8a80; --danger-soft: #3b1a18;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+.wrap { max-width: 720px; margin: 0 auto; padding: 28px 16px 60px; }
+.steps { display: flex; gap: 6px; margin-bottom: 20px; }
+.steps span { flex: 1; height: 4px; border-radius: 4px; background: var(--line); }
+.steps span.on { background: var(--accent); }
+h1 { font-size: 26px; line-height: 1.2; margin: 0 0 6px; }
+h2 { font-size: 17px; margin: 0 0 6px; }
+.lead { color: var(--muted); margin: 0 0 22px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 18px; margin-bottom: 14px; }
+.choice { display: block; width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.choice:hover, .choice:focus-visible { border-color: var(--accent); outline: none; }
+.choice .tag { display: inline-block; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--soft);
+  border-radius: 999px; padding: 1px 8px; margin-left: 6px; vertical-align: 2px; }
+.choice p { margin: 4px 0 0; color: var(--muted); font-size: 15px; }
+ol { margin: 6px 0 0; padding-left: 22px; }
+ol li { margin: 6px 0; }
+button.btn { font: inherit; font-weight: 600; padding: 10px 18px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.btn:disabled { opacity: .5; cursor: default; }
+button.link { border: 0; background: none; color: var(--accent); font: inherit; padding: 0; cursor: pointer; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 14px; }
+.status { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: 10px; margin-top: 12px;
+  background: var(--soft); }
+.status.ok { background: var(--ok-soft); color: var(--ok); }
+.status.warn { background: var(--warn-soft); color: var(--warn); }
+.status.bad { background: var(--danger-soft); color: var(--danger); }
+.status b { color: inherit; }
+.status .sub { color: var(--muted); display: block; font-size: 14px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: currentColor; margin-top: 7px; flex: none; }
+.spin { width: 16px; height: 16px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+  animation: s 0.8s linear infinite; flex: none; margin-top: 3px; }
+@keyframes s { to { transform: rotate(360deg); } }
+label { display: block; font-weight: 600; margin: 14px 0 4px; }
+.hint { color: var(--muted); font-size: 14px; margin: 2px 0 0; }
+input[type=text], input[type=password] { width: 100%; font: inherit; padding: 10px 12px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+.backup { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.backup:first-of-type { border-top: 0; }
+.backup input { width: 18px; height: 18px; }
+.backup small { color: var(--muted); display: block; }
+details { margin-top: 12px; }
+summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.bar { height: 10px; background: var(--line); border-radius: 10px; overflow: hidden; margin-top: 10px; }
+.bar div { height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+.big { font-size: 34px; font-weight: 700; line-height: 1.1; }
+.muted { color: var(--muted); }
+kbd { font: 13px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 5px; padding: 0 5px; }
+a { color: var(--accent); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="steps" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+
+  <!-- 0. Welcome -->
+  <section data-step="welcome">
+    <h1 id="welcomeTitle">Let's get your messages</h1>
+    <p class="lead" id="welcomeLead">Pick where your texts should come from. Everything stays on this Mac.</p>
+    <button class="card choice" data-source="backup">
+      <h2>Connect my iPhone with a cable <span class="tag">Recommended</span></h2>
+      <p>Gets every message on your phone. No iCloud setup needed. It takes a few minutes to back up your phone to this Mac.</p>
+    </button>
+    <button class="card choice" data-source="mac">
+      <h2>Use the Messages app on this Mac</h2>
+      <p>Choose this if you already see your texts in Messages on this Mac through iCloud.</p>
+    </button>
+    <p id="skipRow" hidden><button class="link" onclick="location.href='/'">Skip, and go to search →</button></p>
+    <p class="hint" id="notMac" hidden>This isn't a Mac, so the wizard can't reach an iPhone or the Messages app.
+      Use the command-line steps in the README instead.</p>
+  </section>
+
+  <!-- 1. Permission -->
+  <section data-step="access" hidden>
+    <h1>Allow access to your messages</h1>
+    <p class="lead">macOS keeps messages and iPhone backups private. You need to allow access once.</p>
+    <div class="card">
+      <ol>
+        <li>Click <b>Open Privacy Settings</b>.</li>
+        <li>Find <b class="app">Terminal</b> in the list and switch it <b>on</b>.<br>
+          <span class="hint">Not in the list? Click <b>+</b>, choose <b>Applications → Utilities → <span class="app">Terminal</span></b>, then click <b>Open</b>.</span></li>
+        <li>When macOS says <span class="app">Terminal</span> has to quit, click <b>Later</b>.</li>
+        <li id="relaunchLi">Come back here and click <b>Restart and continue</b>.</li>
+        <li id="manualLi" hidden>Quit <span class="app">Terminal</span> (<kbd>⌘Q</kbd>), then double-click <b>Start iMessage Search</b> again. You'll return right here.</li>
+      </ol>
+      <div class="actions">
+        <button class="btn primary" id="openFda">Open Privacy Settings</button>
+        <button class="btn" id="relaunch">Restart and continue</button>
+      </div>
+      <div class="status warn" id="accessStatus"><span class="dot"></span><span>Access isn't turned on yet.</span></div>
+    </div>
+    <div class="actions"><button class="btn" data-back>Back</button></div>
+  </section>
+
+  <!-- 2a. iPhone by cable -->
+  <section data-step="backup" hidden>
+    <h1>Connect your iPhone</h1>
+    <p class="lead">Plug your iPhone into this Mac with a cable and unlock it.</p>
+
+    <div class="card">
+      <h2>1. Plug it in</h2>
+      <p class="hint">If your iPhone asks <b>Trust This Computer?</b>, tap <b>Trust</b> and enter your passcode.</p>
+      <div class="status" id="deviceStatus"><span class="spin"></span><span>Looking for your iPhone…</span></div>
+    </div>
+
+    <div class="card">
+      <h2>2. Back it up to this Mac</h2>
+      <p class="hint">This saves a copy of your phone on this Mac, including all your messages. Keep the phone plugged in and unlocked until it finishes.</p>
+
+      <div class="actions">
+        <button class="btn primary" id="backupNow">Back up now</button>
+      </div>
+      <div class="status" id="backupStatus" hidden></div>
+
+      <details id="finderHelp">
+        <summary>Back up with Finder instead</summary>
+        <ol>
+          <li><button class="link" data-open="finder">Open Finder</button>, then click your iPhone in the left sidebar under <b>Locations</b>.</li>
+          <li>On the <b>General</b> tab, choose <b>Back up all of the data on your iPhone to this Mac</b>.</li>
+          <li>Click <b>Back Up Now</b>. When it's done, this page will find the new backup automatically.</li>
+        </ol>
+      </details>
+    </div>
+
+    <div class="card" id="existing" hidden>
+      <h2>Or use a backup that's already on this Mac</h2>
+      <div id="backupList"></div>
+      <div class="actions"><button class="btn" id="useBackup">Use this backup</button></div>
+    </div>
+    <div class="actions"><button class="btn" data-back>Back</button></div>
+  </section>
+
+  <!-- 2b. Messages on this Mac -->
+  <section data-step="mac" hidden>
+    <h1>Sync your messages to this Mac</h1>
+    <p class="lead">Turn on Messages in iCloud on both devices. Your messages then download to this Mac.</p>
+    <div class="card">
+      <h2>On your iPhone</h2>
+      <ol>
+        <li>Open <b>Settings</b>, tap your name, then tap <b>iCloud</b>.</li>
+        <li>Tap <b>See All</b>, then <b>Messages</b>, and turn on <b>Use on this iPhone</b>.</li>
+        <li>In <b>Settings → Apps → Messages</b>, set <b>Keep Messages</b> to <b>Forever</b>.</li>
+      </ol>
+    </div>
+    <div class="card">
+      <h2>On this Mac</h2>
+      <ol>
+        <li><button class="link" data-open="messages">Open Messages</button> and sign in with the same Apple Account as your iPhone.</li>
+        <li>Choose <b>Messages → Settings → iMessage</b>, check <b>Enable Messages in iCloud</b>, and click <b>Sync Now</b>.</li>
+        <li>Leave Messages open. A first sync can take a while if you have lots of messages.</li>
+      </ol>
+      <div class="status" id="macStatus"><span class="spin"></span><span>Checking Messages on this Mac…</span></div>
+    </div>
+    <div class="actions">
+      <button class="btn" data-back>Back</button>
+      <button class="btn primary" id="macContinue" disabled>Continue</button>
+    </div>
+  </section>
+
+  <!-- 3. Build -->
+  <section data-step="build" hidden>
+    <h1>Almost done</h1>
+    <p class="lead">A couple of details, then your messages will be ready to search.</p>
+    <div class="card" id="buildForm">
+      <label for="me">Your first name</label>
+      <input type="text" id="me" autocomplete="given-name">
+      <p class="hint">Shown next to messages you sent.</p>
+
+      <div id="pwBlock" hidden>
+        <label for="password">iPhone backup password</label>
+        <input type="password" id="password" autocomplete="off">
+        <p class="hint">This backup is encrypted. Enter the password you picked for encrypted backups. It's not your Apple Account password, and it isn't saved anywhere.</p>
+      </div>
+
+      <div id="aiBlock">
+        <label for="apikey">AI summaries (optional)</label>
+        <input type="password" id="apikey" placeholder="sk-ant-…" autocomplete="off">
+        <p class="hint">Paste an Anthropic API key to turn on summaries. Get one at
+          <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.
+          You can skip this and add it later.</p>
+      </div>
+      <p class="status ok" id="aiOn" hidden><span class="dot"></span><span>AI summaries are on.</span></p>
+
+      <div class="actions">
+        <button class="btn" data-back>Back</button>
+        <button class="btn primary" id="buildBtn">Get my messages</button>
+      </div>
+      <div class="status bad" id="buildError" hidden></div>
+    </div>
+
+    <div class="card" id="buildProgress" hidden>
+      <h2 id="buildStage">Getting your messages…</h2>
+      <div class="bar"><div id="barFill"></div></div>
+      <p class="hint" id="buildCount">&nbsp;</p>
+    </div>
+
+    <div class="card" id="buildDone" hidden>
+      <div class="big" id="doneCount"></div>
+      <p class="muted" style="margin:4px 0 0">messages ready to search</p>
+      <div class="actions"><button class="btn primary" onclick="location.href='/'">Open search</button></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = (path, body) => fetch(path, body === undefined ? {} :
+  { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+const fmt = (iso) => iso ? new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "";
+const fmtDay = (iso) => iso ? new Date(iso).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "";
+
+let status = {}, source = null, chosenBackup = null, timers = [], pageOpened = Date.now() / 1000;
+const ORDER = ["welcome", "access", "source", "build"];
+
+function show(step) {
+  timers.forEach(clearInterval); timers = [];
+  document.querySelectorAll("section").forEach(s => s.hidden = s.dataset.step !== step);
+  const idx = ORDER.indexOf(["backup", "mac"].includes(step) ? "source" : step);
+  document.querySelectorAll(".steps span").forEach((s, i) => s.classList.toggle("on", i <= idx));
+  window.scrollTo(0, 0);
+  ({ access: enterAccess, backup: enterBackup, mac: enterMac, build: enterBuild })[step]?.();
+  history.replaceState(null, "", "#" + step);
+}
+
+function next() {
+  if (status.fda === false) return show("access");
+  show(source === "mac" ? "mac" : "backup");
+}
+
+document.querySelectorAll("[data-back]").forEach(b => b.addEventListener("click", () => {
+  const cur = document.querySelector("section:not([hidden])").dataset.step;
+  show(cur === "build" ? (source === "mac" ? "mac" : "backup") : "welcome");
+}));
+document.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => api("/api/setup/open", { target: b.dataset.open })));
+document.querySelectorAll("[data-source]").forEach(b => b.addEventListener("click", () => {
+  source = b.dataset.source; store.set("source", source); next();
+}));
+
+function setStatus(el, kind, html) {
+  el.hidden = false;
+  el.className = "status" + (kind && kind !== "busy" ? " " + kind : "");
+  el.innerHTML = (kind === "busy" ? '<span class="spin"></span>' : '<span class="dot"></span>') + `<span>${html}</span>`;
+}
+
+/* ---------- permission ---------- */
+function enterAccess() {
+  document.querySelectorAll(".app").forEach(e => e.textContent = status.host_app);
+  $("relaunch").hidden = $("relaunchLi").hidden = !status.can_relaunch;
+  $("manualLi").hidden = status.can_relaunch;
+  const check = async () => {
+    status = await api("/api/setup/status");
+    if (status.fda !== false) { setStatus($("accessStatus"), "ok", "<b>Access is on.</b>"); setTimeout(next, 600); }
+  };
+  timers.push(setInterval(check, 3000));
+}
+$("openFda").addEventListener("click", () => api("/api/setup/open", { target: "fda" }));
+$("relaunch").addEventListener("click", async () => {
+  store.set("source", source);
+  setStatus($("accessStatus"), "busy", `Restarting ${esc(status.host_app)}… A new tab will open in a few seconds, and you can close this one.`);
+  await api("/api/setup/relaunch", {}).catch(() => {});
+});
+
+/* ---------- iPhone backup ---------- */
+function renderBackups(backups) {
+  const usable = backups.filter(b => b.complete);
+  $("existing").hidden = !usable.length;
+  if (!usable.length) return;
+  if (!chosenBackup || !usable.some(b => b.id === chosenBackup.id)) chosenBackup = usable[0];
+  $("backupList").innerHTML = usable.slice(0, 4).map(b => `
+    <label class="backup"><input type="radio" name="bk" value="${esc(b.id)}" ${b.id === chosenBackup.id ? "checked" : ""}>
+      <span><b>${esc(b.device)}</b> · ${esc(fmt(b.date))}<small>${b.encrypted ? "Encrypted, so you'll need the backup password" : "Not encrypted"}</small></span></label>`).join("");
+  $("backupList").querySelectorAll("input").forEach(r => r.addEventListener("change", () => {
+    chosenBackup = usable.find(b => b.id === r.value);
+  }));
+}
+
+let lastDevices = [], backupStarted = 0, doneSeen = 0;
+async function pollDevices() {
+  const d = await api("/api/setup/devices");
+  lastDevices = d.devices;
+  if (d.devices.length) {
+    setStatus($("deviceStatus"), "ok", `<b>Found ${esc(d.devices.map(x => x.name).join(", "))}.</b>`);
+  } else {
+    setStatus($("deviceStatus"), "busy", "Looking for your iPhone… Make sure it's plugged in and unlocked.");
+  }
+  renderBackups(d.backups);
+
+  // A new, finished backup appeared since this page opened: use it.
+  const fresh = d.backups.find(b => b.complete && b.ts > Math.max(pageOpened, backupStarted) - 5);
+  const job = d.backup_job;
+  if (job.state === "running") {
+    const m = Math.floor(job.elapsed / 60), s = String(job.elapsed % 60).padStart(2, "0");
+    setStatus($("backupStatus"), "busy", `<b>Backing up… ${m}:${s}</b><span class="sub">Keep your iPhone plugged in and unlocked. This can take 5–30 minutes.</span>`);
+    $("backupNow").disabled = true;
+  } else if (fresh) {
+    chosenBackup = fresh;
+    setStatus($("backupStatus"), "ok", `<b>Backup finished (${esc(fmt(fresh.date))}).</b>`);
+    setTimeout(() => show("build"), 900);
+  } else if (job.state === "done" && !fresh && (doneSeen ||= Date.now()) > Date.now() - 20000) {
+    setStatus($("backupStatus"), "busy", "<b>Finishing up…</b>");
+  } else if (job.state === "failed" || (job.state === "done" && !fresh)) {
+    $("backupNow").disabled = false;
+    setStatus($("backupStatus"), "warn", `<b>The automatic backup didn't finish.</b><span class="sub">Use Finder instead. The steps are just below.</span>`);
+    $("finderHelp").open = true;
+  }
+}
+
+function enterBackup() {
+  $("backupNow").hidden = !status.backup_tool;
+  if (!status.backup_tool) $("finderHelp").open = true;
+  pollDevices();
+  timers.push(setInterval(pollDevices, 3000));
+}
+$("backupNow").addEventListener("click", async () => {
+  if (!lastDevices.length) { setStatus($("backupStatus"), "warn", "Plug in and unlock your iPhone first."); return; }
+  backupStarted = Date.now() / 1000; doneSeen = 0;
+  const r = await api("/api/setup/backup", { serial: lastDevices[0].serial });
+  if (r.error) { setStatus($("backupStatus"), "warn", esc(r.error)); $("finderHelp").open = true; return; }
+  pollDevices();
+});
+$("useBackup").addEventListener("click", () => { if (chosenBackup) show("build"); });
+
+/* ---------- Messages on this Mac ---------- */
+let lastCount = null;
+function enterMac() {
+  const poll = async () => {
+    const m = await api("/api/setup/mac");
+    if (!m.exists) {
+      setStatus($("macStatus"), "busy", "No messages on this Mac yet. Turn on Messages in iCloud using the steps above.");
+    } else if (!m.readable) {
+      setStatus($("macStatus"), "bad", "Couldn't read the Messages database. " + esc(m.error || ""));
+    } else {
+      const growing = lastCount !== null && m.count > lastCount;
+      setStatus($("macStatus"), growing ? "busy" : "ok",
+        `<b>${m.count.toLocaleString()} messages on this Mac</b>` +
+        `<span class="sub">From ${esc(fmtDay(m.oldest))} to ${esc(fmtDay(m.newest))}. ` +
+        (growing ? "Still syncing. You can continue now or wait for more to arrive." : "If older messages are missing, the sync may not be finished yet.") + "</span>");
+      lastCount = m.count;
+      $("macContinue").disabled = m.count === 0;
+    }
+  };
+  poll();
+  timers.push(setInterval(poll, 5000));
+}
+$("macContinue").addEventListener("click", () => show("build"));
+
+/* ---------- Build ---------- */
+function enterBuild() {
+  $("me").value = $("me").value || status.me_default || "";
+  $("pwBlock").hidden = !(source === "backup" && chosenBackup?.encrypted);
+  $("aiBlock").hidden = status.ai;
+  $("aiOn").hidden = !status.ai;
+  $("buildForm").hidden = false; $("buildProgress").hidden = true; $("buildDone").hidden = true;
+  $("buildError").hidden = true;
+}
+
+$("buildBtn").addEventListener("click", async () => {
+  $("buildError").hidden = true;
+  if (!$("pwBlock").hidden && !$("password").value) {
+    setStatus($("buildError"), "bad", "Enter the backup password."); return;
+  }
+  const key = $("apikey").value.trim();
+  if (key) {
+    const r = await api("/api/setup/apikey", { key });
+    if (r.error) { setStatus($("buildError"), "bad", esc(r.error)); return; }
+  }
+  const r = await api("/api/setup/build", {
+    source, backup_id: chosenBackup?.id, password: $("password").value, me: $("me").value,
+  });
+  if (r.error) { setStatus($("buildError"), "bad", esc(r.error)); return; }
+  $("buildForm").hidden = true; $("buildProgress").hidden = false;
+  const t = setInterval(async () => {
+    const j = await api("/api/setup/build");
+    $("buildStage").textContent = j.stage || "Working…";
+    if (j.total) {
+      $("barFill").style.width = Math.round(100 * j.done / j.total) + "%";
+      $("buildCount").textContent = `${j.done.toLocaleString()} of ${j.total.toLocaleString()} messages`;
+    }
+    if (j.state === "done") {
+      clearInterval(t);
+      $("buildProgress").hidden = true; $("buildDone").hidden = false;
+      $("doneCount").textContent = j.result.messages.toLocaleString();
+      $("password").value = "";
+      setTimeout(() => location.href = "/", 2500);
+    } else if (j.state === "failed") {
+      clearInterval(t);
+      $("buildProgress").hidden = true; $("buildForm").hidden = false;
+      if (j.needs_password) { $("pwBlock").hidden = false; $("password").select(); }
+      setStatus($("buildError"), "bad", esc(j.error));
+    }
+  }, 700);
+  timers.push(t);
+});
+
+/* ---------- start ---------- */
+(async () => {
+  status = await api("/api/setup/status");
+  if (status.index_ready) {
+    $("welcomeTitle").textContent = "Update your messages";
+    const when = status.last_setup?.built;
+    $("welcomeLead").textContent = when ? `Last updated ${fmt(when)}. Pick a source to bring in newer messages.` : "Pick a source to bring in newer messages.";
+    $("skipRow").hidden = false;
+  }
+  $("notMac").hidden = status.platform_mac;
+  source = store.get("source");
+  const hash = location.hash.slice(1);
+  // Returning after the restart for permissions: continue where we left off.
+  if (source && ["resume", "access", "backup", "mac"].includes(hash)) next();
+  else show("welcome");
+})();
+</script>
+</body>
+</html>

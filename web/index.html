@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Message Search</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1f; --muted: #6e6e73; --line: #e3e3e0;
+  --accent: #2f6fdf; --accent-text: #fff; --me: #e8f0fe; --them: #f1f1ef; --mark: #fff1a8; --hit: #fff8d6;
+  --danger: #b3261e;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151516; --panel: #1f1f21; --text: #ececee; --muted: #9a9aa0; --line: #333336;
+    --accent: #6d9cff; --accent-text: #0b1020; --me: #1e2a44; --them: #28282b; --mark: #6b5a00; --hit: #2e2a18;
+    --danger: #ff8a80;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+header { padding: 20px 16px 8px; max-width: 1200px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0; }
+header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+main { max-width: 1200px; margin: 0 auto; padding: 8px 16px 40px; display: grid; gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
+@media (max-width: 900px) { main { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+form { display: grid; gap: 10px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row > * { flex: 1 1 140px; }
+label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 3px; }
+input, select, textarea, button { font: inherit; color: inherit; }
+input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); }
+textarea { resize: vertical; min-height: 60px; }
+button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { background: var(--them); border: 1px solid var(--line); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 13px; }
+.chip button { border: 0; background: none; padding: 0 6px; color: var(--muted); }
+.status { color: var(--muted); font-size: 13px; margin: 12px 2px 8px; }
+.error { color: var(--danger); }
+.msg { border-top: 1px solid var(--line); padding: 10px 2px; }
+.msg:first-child { border-top: 0; }
+.meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; }
+.meta b { color: var(--text); font-weight: 600; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1px; }
+.linkbtn { border: 0; background: none; color: var(--accent); padding: 0; font-size: 12px; cursor: pointer; }
+.ctx { margin: 8px 0 2px; display: grid; gap: 4px; }
+.bubble { padding: 6px 10px; border-radius: 10px; background: var(--them); max-width: 85%; font-size: 14px; }
+.bubble.me { background: var(--me); justify-self: end; }
+.bubble.hit { outline: 2px solid var(--mark); background: var(--hit); }
+.bubble small { display: block; color: var(--muted); font-size: 11px; }
+aside { position: sticky; top: 12px; }
+@media (max-width: 900px) { aside { position: static; } }
+aside h2 { font-size: 15px; margin: 0 0 8px; }
+.summary { margin-top: 12px; font-size: 14px; overflow-wrap: anywhere; }
+.summary h3, .summary h4 { font-size: 14px; margin: 12px 0 4px; }
+.summary ul { padding-left: 18px; margin: 4px 0; }
+.note { font-size: 12px; color: var(--muted); }
+.check { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.check input { width: auto; }
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
+    <h1>Message Search</h1>
+    <a href="/setup" style="color:var(--accent);font-size:14px;text-decoration:none">Update messages</a>
+  </div>
+  <p id="stats">Loading index…</p>
+</header>
+<main>
+  <section>
+    <div class="panel">
+      <form id="form">
+        <div>
+          <label for="q">Words</label>
+          <input id="q" placeholder='e.g. dinner friday   ·   "exact phrase"   ·   pay*' autofocus>
+        </div>
+        <div class="row">
+          <div>
+            <label for="mode">Match</label>
+            <select id="mode">
+              <option value="all">All words</option>
+              <option value="any">Any word</option>
+              <option value="phrase">Exact phrase</option>
+            </select>
+          </div>
+          <div>
+            <label for="senderInput">Sender</label>
+            <input id="senderInput" list="senderList" placeholder="Anyone">
+            <datalist id="senderList"></datalist>
+          </div>
+          <div>
+            <label for="chat">Conversation</label>
+            <select id="chat"><option value="">All conversations</option></select>
+          </div>
+        </div>
+        <div class="chips" id="chips"></div>
+        <div class="row">
+          <div><label for="from">From date</label><input id="from" type="date"></div>
+          <div><label for="to">To date</label><input id="to" type="date"></div>
+          <div>
+            <label for="sort">Order</label>
+            <select id="sort"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+          </div>
+          <div style="flex:0 0 auto; align-self:end"><button class="primary" type="submit">Search</button></div>
+        </div>
+      </form>
+    </div>
+    <div class="status" id="status"></div>
+    <div class="panel" id="results" hidden></div>
+    <div style="text-align:center; margin-top:10px"><button id="more" hidden>Load more</button></div>
+  </section>
+
+  <aside class="panel">
+    <h2>AI summary</h2>
+    <label for="question">What do you want to know? (optional)</label>
+    <textarea id="question" placeholder="e.g. What was decided about the trip, and when?"></textarea>
+    <div class="check" style="margin:8px 0">
+      <input type="checkbox" id="withCtx" checked><label for="withCtx" style="margin:0">Include 3 messages around each result</label>
+    </div>
+    <button class="primary" id="summarize" disabled>Summarize results</button>
+    <p class="note" id="aiNote">Sends the loaded results to Claude via your API key. Nothing else leaves your Mac.</p>
+    <div class="summary" id="summary"></div>
+  </aside>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let senders = [], selected = [], loaded = [], total = 0, lastParams = null, aiEnabled = false;
+
+function fmtDate(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function terms() {
+  const q = $("q").value.trim();
+  if (!q) return [];
+  if ($("mode").value === "phrase") return [q];
+  return (q.match(/"[^"]+"|\S+/g) || []).map(t => t.replace(/"/g, "").replace(/\*$/, "")).filter(Boolean);
+}
+
+function highlight(text) {
+  let html = esc(text);
+  const ts = terms();
+  if (!ts.length) return html;
+  const re = new RegExp("(" + ts.map(t => esc(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "gi");
+  return html.replace(re, "<mark>$1</mark>");
+}
+
+function renderChips() {
+  $("chips").innerHTML = selected.map((s, i) =>
+    `<span class="chip">${esc(s)}<button type="button" aria-label="Remove ${esc(s)}" data-i="${i}">×</button></span>`).join("");
+}
+$("chips").addEventListener("click", e => {
+  if (e.target.dataset.i !== undefined) { selected.splice(+e.target.dataset.i, 1); renderChips(); }
+});
+function addSender() {
+  const v = $("senderInput").value.trim();
+  if (v && senders.some(s => s.sender === v) && !selected.includes(v)) { selected.push(v); renderChips(); }
+  $("senderInput").value = "";
+}
+$("senderInput").addEventListener("change", addSender);
+$("senderInput").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addSender(); } });
+
+async function loadMeta() {
+  const meta = await fetch("/api/meta").then(r => r.json());
+  senders = meta.senders;
+  aiEnabled = meta.ai;
+  $("senderList").innerHTML = senders.map(s => `<option value="${esc(s.sender)}">${s.n.toLocaleString()} messages</option>`).join("");
+  $("chat").innerHTML += meta.chats.map(c => `<option value="${c.chat_id}">${esc(c.label)} (${c.message_count.toLocaleString()})</option>`).join("");
+  const n = senders.reduce((a, s) => a + s.n, 0);
+  $("stats").textContent = `${n.toLocaleString()} messages · ${meta.chats.length} conversations · ${senders.length} senders`;
+  if (!aiEnabled) showKeyForm();
+}
+
+function showKeyForm() {
+  $("aiNote").innerHTML = `To turn on summaries, paste an Anthropic API key
+    (<a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">get one here</a>):
+    <span style="display:flex;gap:6px;margin-top:6px"><input id="keyIn" type="password" placeholder="sk-ant-…">
+    <button type="button" id="keySave">Save</button></span><span id="keyMsg"></span>`;
+  $("keySave").addEventListener("click", async () => {
+    const r = await fetch("/api/setup/apikey", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: $("keyIn").value }) }).then(r => r.json());
+    if (r.error) { $("keyMsg").innerHTML = `<span class="error">${esc(r.error)}</span>`; return; }
+    aiEnabled = true;
+    $("aiNote").textContent = "Summaries are on. Only the results you summarize are sent to Claude.";
+    $("summarize").disabled = !loaded.length;
+  });
+}
+
+function params(offset = 0) {
+  const p = new URLSearchParams({ q: $("q").value, mode: $("mode").value, chat: $("chat").value,
+    from: $("from").value, to: $("to").value, sort: $("sort").value, limit: 200, offset });
+  selected.forEach(s => p.append("sender", s));
+  return p;
+}
+
+async function runSearch(append = false) {
+  addSender();
+  const p = params(append ? loaded.length : 0);
+  if (!append) { loaded = []; $("summary").innerHTML = ""; }
+  $("status").textContent = "Searching…";
+  const data = await fetch("/api/search?" + p).then(r => r.json());
+  if (data.error) { $("status").innerHTML = `<span class="error">${esc(data.error)}</span>`; return; }
+  total = data.total;
+  loaded = loaded.concat(data.results);
+  lastParams = Object.fromEntries(p);
+  lastParams.sender = selected;
+  $("status").textContent = total ? `${total.toLocaleString()} matching messages · showing ${loaded.length.toLocaleString()}` : "No matches.";
+  $("results").hidden = !loaded.length;
+  $("results").innerHTML = loaded.map(r => `
+    <div class="msg" data-id="${r.id}">
+      <div class="meta"><b>${esc(r.sender)}</b><span>${esc(fmtDate(r.date))}</span><span>${esc(r.chat || "")}</span></div>
+      <div class="text">${highlight(r.text)}</div>
+      <button class="linkbtn" type="button" data-ctx="${r.id}">Show conversation</button>
+      <div class="ctx" hidden></div>
+    </div>`).join("");
+  $("more").hidden = loaded.length >= total;
+  $("summarize").disabled = !loaded.length || !aiEnabled;
+}
+
+$("results").addEventListener("click", async e => {
+  const id = e.target.dataset.ctx;
+  if (!id) return;
+  const box = e.target.nextElementSibling;
+  if (!box.hidden) { box.hidden = true; e.target.textContent = "Show conversation"; return; }
+  const rows = await fetch(`/api/context?id=${id}&n=10`).then(r => r.json());
+  box.innerHTML = rows.map(m => `<div class="bubble ${m.is_from_me ? "me" : ""} ${m.id == id ? "hit" : ""}">
+      <small>${esc(m.sender)} · ${esc(fmtDate(m.date))}</small>${highlight(m.text)}</div>`).join("");
+  box.hidden = false;
+  e.target.textContent = "Hide conversation";
+  box.querySelector(".hit")?.scrollIntoView({ block: "center", behavior: "smooth" });
+});
+
+$("form").addEventListener("submit", e => { e.preventDefault(); runSearch(); });
+$("more").addEventListener("click", () => runSearch(true));
+
+function md(s) {
+  const lines = esc(s).split("\n");
+  let out = "", inList = false;
+  for (let line of lines) {
+    line = line.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+    const li = line.match(/^\s*[-*]\s+(.*)/);
+    if (li) { if (!inList) { out += "<ul>"; inList = true; } out += `<li>${li[1]}</li>`; continue; }
+    if (inList) { out += "</ul>"; inList = false; }
+    const h = line.match(/^(#{1,4})\s+(.*)/);
+    if (h) out += `<h${h[1].length > 2 ? 4 : 3}>${h[2]}</h${h[1].length > 2 ? 4 : 3}>`;
+    else if (line.trim()) out += `<p>${line}</p>`;
+  }
+  return out + (inList ? "</ul>" : "");
+}
+
+$("summarize").addEventListener("click", async () => {
+  $("summarize").disabled = true;
+  $("summary").innerHTML = `<p class="note">Summarizing ${loaded.length.toLocaleString()} messages…</p>`;
+  const res = await fetch("/api/summarize", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids: loaded.map(r => r.id), with_context: $("withCtx").checked,
+      question: $("question").value, filters: lastParams }) }).then(r => r.json());
+  $("summarize").disabled = false;
+  if (res.error) { $("summary").innerHTML = `<p class="error">${esc(res.error)}</p>`; return; }
+  const note = `<p class="note">${res.messages_sent.toLocaleString()} messages sent to ${esc(res.model)}` +
+    (res.truncated ? " (trimmed to fit, so narrow your search for full coverage)" : "") +
+    (loaded.length < total ? `. Only the ${loaded.length} loaded results were included; load more to include others.` : "") + "</p>";
+  $("summary").innerHTML = md(res.summary) + note;
+});
+
+loadMeta().catch(() => { $("stats").textContent = "Couldn't reach iMessage Search. Double-click Start iMessage Search to run it again."; });
+</script>
+</body>
+</html>

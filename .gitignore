@@ -1,0 +1,17 @@
+# Never commit message data, contacts, or keys.
+data/
+output/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.csv
+*.md.local
+categories.local.json
+.env
+
+# Python / macOS
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
