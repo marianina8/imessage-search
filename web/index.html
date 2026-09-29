@@ -55,7 +55,7 @@ mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 1
 .bubble.me { background: var(--me); justify-self: end; }
 .bubble.hit { outline: 2px solid var(--mark); background: var(--hit); }
 .bubble small { display: block; color: var(--muted); font-size: 11px; }
-aside { position: sticky; top: 12px; }
+aside { position: sticky; top: 12px; display: grid; gap: 16px; max-height: calc(100vh - 24px); overflow: auto; }
 @media (max-width: 900px) { aside { position: static; } }
 aside h2 { font-size: 15px; margin: 0 0 8px; }
 .summary { margin-top: 12px; font-size: 14px; overflow-wrap: anywhere; }
@@ -70,9 +70,11 @@ aside h2 { font-size: 15px; margin: 0 0 8px; }
 <header>
   <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap">
     <h1>Message Search</h1>
-    <a href="/setup" style="color:var(--accent);font-size:14px;text-decoration:none">Update messages</a>
+    <a href="/setup" id="updateLink" style="color:var(--accent);font-size:14px;text-decoration:none">Update messages</a>
   </div>
   <p id="stats">Loading index…</p>
+  <p id="demoBanner" hidden style="margin:8px 0 0;padding:8px 12px;border-radius:8px;background:var(--hit);font-size:13px">
+    <b>Demo:</b> these messages are fictional. Try searching <i>deposit</i> or <i>ceiling</i>, or pick <i>Dana Whitfield</i> as the sender.</p>
 </header>
 <main>
   <section>
@@ -118,7 +120,8 @@ aside h2 { font-size: 15px; margin: 0 0 8px; }
     <div style="text-align:center; margin-top:10px"><button id="more" hidden>Load more</button></div>
   </section>
 
-  <aside class="panel">
+  <aside>
+   <div class="panel">
     <h2>AI summary</h2>
     <label for="question">What do you want to know? (optional)</label>
     <textarea id="question" placeholder="e.g. What was decided about the trip, and when?"></textarea>
@@ -128,6 +131,24 @@ aside h2 { font-size: 15px; margin: 0 0 8px; }
     <button class="primary" id="summarize" disabled>Summarize results</button>
     <p class="note" id="aiNote">Sends the loaded results to Claude via your API key. Nothing else leaves your Mac.</p>
     <div class="summary" id="summary"></div>
+   </div>
+   <div class="panel">
+    <h2>Export</h2>
+    <p class="note" style="margin-top:0">A report you can save as a PDF, plus a spreadsheet of the same messages, with the loaded results and the conversation around them.</p>
+    <label for="exTitle">Report title</label>
+    <input id="exTitle" placeholder="e.g. Messages with Jordan about the house">
+    <div class="row" style="margin-top:8px">
+      <div><label for="exBy">Prepared by</label><input id="exBy"></div>
+      <div><label for="exCtx">Context (before and after)</label>
+        <select id="exCtx"><option value="0">None</option><option value="3">3 messages</option>
+          <option value="5" selected>5 messages</option><option value="10">10 messages</option></select></div>
+    </div>
+    <div class="check" style="margin:10px 0">
+      <input type="checkbox" id="exAI"><label for="exAI" style="margin:0">Include an AI summary that cites each message</label>
+    </div>
+    <button class="primary" id="exportBtn" disabled>Export</button>
+    <p class="note" id="exNote"></p>
+   </div>
   </aside>
 </main>
 
@@ -176,6 +197,9 @@ async function loadMeta() {
   const meta = await fetch("/api/meta").then(r => r.json());
   senders = meta.senders;
   aiEnabled = meta.ai;
+  if (meta.demo) { $("demoBanner").hidden = false; $("updateLink").hidden = true; }
+  $("exBy").value = meta.me_name && meta.me_name !== "Me" ? meta.me_name : "";
+  $("exAI").checked = aiEnabled; $("exAI").disabled = !aiEnabled;
   $("senderList").innerHTML = senders.map(s => `<option value="${esc(s.sender)}">${s.n.toLocaleString()} messages</option>`).join("");
   $("chat").innerHTML += meta.chats.map(c => `<option value="${c.chat_id}">${esc(c.label)} (${c.message_count.toLocaleString()})</option>`).join("");
   const n = senders.reduce((a, s) => a + s.n, 0);
@@ -195,6 +219,7 @@ function showKeyForm() {
     aiEnabled = true;
     $("aiNote").textContent = "Summaries are on. Only the results you summarize are sent to Claude.";
     $("summarize").disabled = !loaded.length;
+    $("exAI").disabled = false; $("exAI").checked = true;
   });
 }
 
@@ -220,13 +245,14 @@ async function runSearch(append = false) {
   $("results").hidden = !loaded.length;
   $("results").innerHTML = loaded.map(r => `
     <div class="msg" data-id="${r.id}">
-      <div class="meta"><b>${esc(r.sender)}</b><span>${esc(fmtDate(r.date))}</span><span>${esc(r.chat || "")}</span></div>
+      <div class="meta"><b>${esc(r.sender)}</b><span>${esc(fmtDate(r.date))}</span><span>Chat: ${esc(r.chat || "")}</span></div>
       <div class="text">${highlight(r.text)}</div>
       <button class="linkbtn" type="button" data-ctx="${r.id}">Show conversation</button>
       <div class="ctx" hidden></div>
     </div>`).join("");
   $("more").hidden = loaded.length >= total;
   $("summarize").disabled = !loaded.length || !aiEnabled;
+  $("exportBtn").disabled = !loaded.length;
 }
 
 $("results").addEventListener("click", async e => {
@@ -273,6 +299,35 @@ $("summarize").addEventListener("click", async () => {
     (loaded.length < total ? `. Only the ${loaded.length} loaded results were included; load more to include others.` : "") + "</p>";
   $("summary").innerHTML = md(res.summary) + note;
 });
+
+$("exportBtn").addEventListener("click", async () => {
+  // Open the tab right away so the browser doesn't block it as a pop-up.
+  const tab = window.open("", "_blank");
+  if (tab) tab.document.write("<p style='font:16px system-ui;padding:24px'>Preparing your report…</p>");
+  $("exportBtn").disabled = true;
+  $("exNote").innerHTML = `Preparing ${loaded.length.toLocaleString()} results` +
+    ($("exAI").checked ? " and writing the summary. This can take a minute…" : "…");
+  let r;
+  try {
+    r = await fetch("/api/export", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: loaded.map(x => x.id), context: +$("exCtx").value, title: $("exTitle").value || defaultTitle(),
+        prepared_by: $("exBy").value, include_summary: $("exAI").checked, question: $("question").value, filters: lastParams }) })
+      .then(x => x.json());
+  } catch (err) { r = { error: "Couldn't reach iMessage Search. Is it still running?" }; }
+  $("exportBtn").disabled = false;
+  if (r.error) { $("exNote").innerHTML = `<span class="error">${esc(r.error)}</span>`; if (tab) tab.close(); return; }
+  const url = "/report/" + r.token;
+  if (tab) tab.location = url; else window.open(url, "_blank");
+  $("exNote").innerHTML = `Report ready with ${r.count.toLocaleString()} messages. <a href="${url}" target="_blank">Open it again</a>`;
+  if (loaded.length < total) $("exNote").innerHTML += `<br>Only the ${loaded.length.toLocaleString()} loaded results were included. Click “Load more” first to include all ${total.toLocaleString()}.`;
+});
+
+function defaultTitle() {
+  const parts = [];
+  if (selected.length) parts.push("with " + selected.join(", "));
+  if ($("q").value.trim()) parts.push(`mentioning “${$("q").value.trim()}”`);
+  return "Text messages" + (parts.length ? " " + parts.join(" ") : "");
+}
 
 loadMeta().catch(() => { $("stats").textContent = "Couldn't reach iMessage Search. Double-click Start iMessage Search to run it again."; });
 </script>

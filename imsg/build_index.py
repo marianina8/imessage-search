@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import os
 import re
 import sqlite3
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -222,6 +224,8 @@ SCHEMA = """
 DROP TABLE IF EXISTS messages;
 DROP TABLE IF EXISTS chats;
 DROP TABLE IF EXISTS messages_fts;
+DROP TABLE IF EXISTS meta;
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE chats (
     chat_id INTEGER PRIMARY KEY,
     label TEXT,
@@ -241,7 +245,8 @@ CREATE TABLE messages (
     text TEXT,
     text_source TEXT,                 -- text | attributedBody | unresolved | attachment
     has_attachment INTEGER,
-    is_reaction INTEGER
+    is_reaction INTEGER,
+    attachments TEXT                  -- attachment file names, "; "-separated
 );
 CREATE INDEX idx_messages_chat_ts ON messages(chat_id, ts);
 CREATE INDEX idx_messages_sender ON messages(sender);
@@ -251,16 +256,52 @@ CREATE VIRTUAL TABLE messages_fts USING fts5(
 """
 
 
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def local_timezone_name() -> str:
+    tz = os.environ.get("TZ", "").lstrip(":")
+    if "/" in tz and not tz.startswith("/"):
+        return tz
+    try:
+        link = os.readlink("/etc/localtime")
+        if "zoneinfo/" in link:
+            return link.split("zoneinfo/", 1)[1]
+    except OSError:
+        pass
+    return time.strftime("%Z")
+
+
+def load_attachments(src) -> dict[int, str]:
+    try:
+        rows = src.execute("""
+            SELECT maj.message_id, COALESCE(a.transfer_name, a.filename, 'attachment')
+            FROM message_attachment_join maj JOIN attachment a ON a.ROWID = maj.attachment_id
+        """).fetchall()
+    except sqlite3.Error:
+        return {}
+    out: dict[int, list[str]] = {}
+    for mid, name in rows:
+        out.setdefault(mid, []).append(Path(str(name)).name)
+    return {k: "; ".join(v) for k, v in out.items()}
+
+
 def build(db_path: Path, out_path: Path, chat_ids: list[int], me_name: str, use_contacts: bool,
-          ios_contacts: Path | None = None, progress=None) -> dict:
+          ios_contacts: Path | None = None, progress=None, source_desc: str = "") -> dict:
     """Build the index. `progress(done, total)` is called periodically if given."""
+    source_hash = sha256_file(db_path)
     src = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     src.row_factory = sqlite3.Row
 
-    contacts = load_contacts() if use_contacts else {}
-    if use_contacts and ios_contacts and Path(ios_contacts).exists():
+    contacts = load_contacts() if use_contacts else {}  # this Mac's Contacts app
+    if ios_contacts and Path(ios_contacts).exists():   # iPhone Contacts from a backup
         contacts.update(load_ios_contacts(Path(ios_contacts)))
-    if use_contacts:
+    if contacts:
         print(f"Contacts resolved: {len(contacts)} phone numbers/emails")
     if not HAVE_TYPEDSTREAM:
         print("Note: pytypedstream not installed; using built-in fallback decoder.")
@@ -291,6 +332,7 @@ def build(db_path: Path, out_path: Path, chat_ids: list[int], me_name: str, use_
     ).fetchone()[0]
     done = 0
     counts = {"text": 0, "attributedBody": 0, "unresolved": 0, "attachment": 0}
+    attachments = load_attachments(src)
     batch = []
     for r in src.execute(MESSAGE_SQL.format(where=where), params):
         done += 1
@@ -314,16 +356,27 @@ def build(db_path: Path, out_path: Path, chat_ids: list[int], me_name: str, use_
             int(bool(r["is_from_me"])), handle, sender, r["service"] or "",
             text, source, int(bool(r["cache_has_attachments"])),
             int(2000 <= (r["associated_message_type"] or 0) < 4000),  # tapbacks
+            attachments.get(r["message_id"], ""),
         ))
         if len(batch) >= 5000:
-            dst.executemany("INSERT OR IGNORE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", batch)
+            dst.executemany("INSERT OR IGNORE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", batch)
             batch.clear()
     if batch:
-        dst.executemany("INSERT OR IGNORE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", batch)
+        dst.executemany("INSERT OR IGNORE INTO messages VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", batch)
 
     if progress:
         progress(total_src, total_src)
     dst.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+    meta = {
+        "built_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "source_desc": source_desc or f"Messages database file {db_path.name}",
+        "source_file": str(db_path),
+        "source_sha256": source_hash,
+        "me_name": me_name,
+        "timezone": local_timezone_name(),
+        "tool": "iMessage Search (github.com/marianina8/imessage-search)",
+    }
+    dst.executemany("INSERT INTO meta VALUES (?, ?)", meta.items())
     dst.commit()
     total = dst.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
     dst.close()
@@ -363,7 +416,7 @@ def main(argv=None):
     else:
         ios = db.parent / "contacts.sqlitedb"
         build(db, args.out.expanduser(), args.chat, args.me, not args.no_contacts,
-              ios_contacts=ios if ios.exists() else None)
+              ios_contacts=ios if ios.exists() and not args.no_contacts else None)
 
 
 if __name__ == "__main__":

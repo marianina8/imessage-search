@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import socket
 import sqlite3
 import threading
@@ -26,13 +27,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from . import build_index, macos
+from . import build_index, macos, report
 
 ROOT = Path(__file__).resolve().parent.parent
 STATIC = ROOT / "web"
 DEFAULT_INDEX = ROOT / "data" / "index.sqlite"
 DEFAULT_MODEL = "claude-sonnet-5-5"
-MAX_SUMMARY_CHARS = 120_000  # keep prompts comfortably inside the context window
+MAX_SUMMARY_CHARS = 120_000
+DEMO = False  # set by imsg.demo: fictional data, setup wizard disabled  # keep prompts comfortably inside the context window
 
 
 def load_dotenv():
@@ -155,6 +157,34 @@ SYSTEM_PROMPT = (
 )
 
 
+class ClaudeError(Exception):
+    pass
+
+
+def call_claude(system: str, user_msg: str, max_tokens: int = 2500) -> tuple[str, str]:
+    """Send one message to the Anthropic API. Returns (text, model)."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ClaudeError("No Anthropic API key is set. Add one on the search page.")
+    model = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
+    payload = {"model": model, "max_tokens": max_tokens, "system": system,
+               "messages": [{"role": "user", "content": user_msg}]}
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=json.dumps(payload).encode(),
+        headers={"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            data = json.load(resp)
+    except urllib.error.HTTPError as exc:
+        raise ClaudeError(f"Anthropic API error {exc.code}: {exc.read().decode()[:500]}") from exc
+    except urllib.error.URLError as exc:
+        raise ClaudeError(f"Could not reach the Anthropic API: {exc.reason}") from exc
+    text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+    return text, data.get("model", model)
+
+
 def summarize(conn, body: dict) -> dict:
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
@@ -194,31 +224,56 @@ def summarize(conn, body: dict) -> dict:
         f"<messages>\n" + "\n".join(lines) + "\n</messages>\n\n"
         f"Task: {task}"
     )
-    payload = {
-        "model": os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL),
-        "max_tokens": 2500,
-        "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": user_msg}],
-    }
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        data=json.dumps(payload).encode(),
-        headers={
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-    )
     try:
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            data = json.load(resp)
-    except urllib.error.HTTPError as exc:
-        return {"error": f"Anthropic API error {exc.code}: {exc.read().decode()[:500]}"}
-    except urllib.error.URLError as exc:
-        return {"error": f"Could not reach the Anthropic API: {exc.reason}"}
+        text, model = call_claude(SYSTEM_PROMPT, user_msg, 2500)
+    except ClaudeError as exc:
+        return {"error": str(exc)}
+    return {"summary": text, "messages_sent": len(lines), "truncated": truncated, "model": model}
 
-    text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
-    return {"summary": text, "messages_sent": len(lines), "truncated": truncated, "model": payload["model"]}
+
+# --------------------------------------------------------------------------- #
+# Export
+# --------------------------------------------------------------------------- #
+EXPORTS: dict[str, dict] = {}  # token -> {"html": str, "csv": bytes, "name": str}
+
+
+def create_export(conn, body: dict) -> dict:
+    ids = [int(i) for i in body.get("ids", [])]
+    if not ids:
+        return {"error": "Search first, then export the results."}
+    context_n = max(0, min(int(body.get("context", 5)), 25))
+    rows = report.collect(conn, ids, context_n)
+    if not rows:
+        return {"error": "Nothing to export."}
+    info = {
+        "title": (body.get("title") or "Text messages").strip()[:150],
+        "prepared_by": (body.get("prepared_by") or "").strip()[:100],
+        "context_n": context_n,
+        "filters": body.get("filters") or {},
+        "chats": {c["chat_id"]: c["label"] for c in chats(conn)},
+        "meta": report.meta(conn),
+        "question": (body.get("question") or "").strip(),
+    }
+    if body.get("include_summary"):
+        transcript, truncated = report.summary_input(rows)
+        focus = f"\n\nFocus especially on: {info['question']}" if info["question"] else ""
+        try:
+            text, model = call_claude(
+                report.REPORT_SYSTEM_PROMPT,
+                f"<messages>\n{transcript}\n</messages>{focus}", max_tokens=4000)
+        except ClaudeError as exc:
+            return {"error": f"The report wasn't created because the AI summary failed: {exc}"}
+        info.update(summary=text, model=model, summary_truncated=truncated,
+                    summary_count=transcript.count("\n") + 1)
+    token = secrets.token_urlsafe(12)
+    EXPORTS[token] = {
+        "html": report.to_html(rows, info, token),
+        "csv": report.to_csv(rows),
+        "name": re.sub(r"[^\w\- ]+", "", info["title"]).strip() or "messages",
+    }
+    while len(EXPORTS) > 20:  # keep memory bounded
+        EXPORTS.pop(next(iter(EXPORTS)))
+    return {"token": token, "count": len(rows)}
 
 
 # --------------------------------------------------------------------------- #
@@ -249,17 +304,24 @@ class BuildJob:
     def _run(self, index_path: Path, body: dict):
         data_dir = index_path.parent
         try:
+            now = datetime.now().astimezone().strftime("%B %-d, %Y at %-I:%M %p %Z")
             if body.get("source") == "backup":
                 self.set(stage="Unlocking and copying messages from the iPhone backup…")
                 got = macos.extract_from_backup(body.get("backup_id", ""), data_dir, body.get("password", ""))
+                info = next((b for b in macos.list_backups() if b["id"] == body.get("backup_id")), {})
+                made = datetime.fromisoformat(info["date"]).strftime("%B %-d, %Y at %-I:%M %p") if info.get("date") else "unknown date"
+                desc = (f"Local (Finder) backup of the iPhone \"{info.get('device', 'iPhone')}\" made {made}"
+                        f"{' (encrypted)' if info.get('encrypted') else ''}. Messages database extracted {now}.")
             else:
                 self.set(stage="Copying messages from the Messages app…")
                 got = macos.copy_from_mac(data_dir)
+                desc = f"Messages app database on this Mac (~/Library/Messages/chat.db), copied {now}."
             self.set(stage="Reading and indexing messages…")
             result = build_index.build(
                 got["db"], index_path, [], (body.get("me") or "Me").strip() or "Me", True,
                 ios_contacts=got["contacts"],
                 progress=lambda done, total: self.set(done=done, total=total),
+                source_desc=desc,
             )
             (data_dir / "setup.json").write_text(json.dumps({
                 "source": body.get("source"), "backup_id": body.get("backup_id"),
@@ -367,7 +429,25 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self.redirect("/setup") if not self.index_path.exists() else self.send_file("index.html")
         if path == "/setup":
-            return self.send_file("setup.html")
+            return self.redirect("/") if DEMO else self.send_file("setup.html")
+        if path.startswith("/report/"):
+            token = path[len("/report/"):]
+            as_csv = token.endswith(".csv")
+            exp = EXPORTS.get(token[:-4] if as_csv else token)
+            if not exp:
+                return self.send_json({"error": "This report has expired. Export again from the search page."}, 404)
+            data = exp["csv"] if as_csv else exp["html"].encode()
+            self.send_response(200)
+            if as_csv:
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="{exp["name"]}.csv"')
+            else:
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+            return
 
         # Setup endpoints work before an index exists.
         if path == "/api/setup/status":
@@ -392,6 +472,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({
                     "senders": senders(conn), "chats": chats(conn),
                     "ai": bool(os.environ.get("ANTHROPIC_API_KEY")), "last_setup": info["last_setup"],
+                    "me_name": report.meta(conn).get("me_name", ""), "demo": DEMO,
                 })
         self.send_json({"error": "not found"}, 404)
 
@@ -403,6 +484,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/summarize":
             with self.db() as conn:
                 return self.send_json(summarize(conn, body))
+        if path == "/api/export":
+            with self.db() as conn:
+                return self.send_json(create_export(conn, body))
         if path == "/api/setup/open":
             return self.send_json({"ok": macos.open_target(body.get("target", ""))})
         if path == "/api/setup/backup":
@@ -446,7 +530,7 @@ def main(argv=None):
     Handler.index_path = args.index.resolve()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print("=" * 60)
-    print(f"  iMessage Search is running at {url}")
+    print(f"  iMessage Search{' DEMO (fictional messages)' if DEMO else ''} is running at {url}")
     print("  Keep this window open while you use it.")
     print("  To stop: close this window, or press Ctrl+C.")
     print("=" * 60)

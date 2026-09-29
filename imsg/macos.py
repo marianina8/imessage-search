@@ -12,7 +12,6 @@ Two sources are supported:
 from __future__ import annotations
 
 import getpass
-import glob
 import json
 import os
 import plistlib
@@ -358,5 +357,4 @@ def extract_from_backup(backup_id: str, data_dir: Path, password: str = "") -> d
 
 
 def find_launcher(root: Path) -> Path:
-    matches = glob.glob(str(root / "*.command"))
-    return Path(matches[0]) if matches else root / "Start iMessage Search.command"
+    return root / "Start iMessage Search.command"

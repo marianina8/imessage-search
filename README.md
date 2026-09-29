@@ -1,8 +1,24 @@
 # iMessage Search
 
-Search your iPhone text messages on your Mac by **who sent them** and **what they say**, read each result in its conversation, and get an **AI summary** of what you found.
+Search years of iPhone text messages on your Mac by **who sent them** and **what they say**. Read each result in its conversation, get an **AI summary that cites every message**, and **export a report** you can hand to a lawyer, accountant, or family member.
 
-Everything runs on your Mac. Your messages stay there, except the specific results you choose to send to Claude for a summary.
+![Searching, summarizing, and exporting demo messages](docs/demo.gif)
+
+## Privacy
+
+- **Runs entirely on your Mac.** Your messages are copied into this folder and searched here. They aren't uploaded anywhere.
+- **Nothing is uploaded unless you ask for an AI summary.** When you click *Summarize* or export with a summary, only those messages go to Anthropic's API, using your own API key. Without a key, nothing leaves your Mac.
+- **Your originals are never changed.** The app reads copies of your Messages database and iPhone backup. Backup passwords aren't saved.
+- **Only you can open it.** The app runs at `127.0.0.1` (this Mac only), so other devices on your network can't see it.
+- **Your data stays out of git.** `.gitignore` excludes message databases, exports, `.env` (your API key), and personal category files.
+
+## Try it with fictional messages
+
+Double-click **Try the Demo** in the folder. It opens the app with a made-up story about a tenant, a roommate, and a landlord arguing over a security deposit. Try searching *deposit*, or look at the [sample report](docs/sample-report.pdf) it produces. Your own messages aren't read.
+
+| Search and AI summary | Conversation context | Export |
+|---|---|---|
+| ![Search results with an AI summary](docs/screenshots/search.png) | ![A result opened in its conversation](docs/screenshots/conversation.png) | ![Export panel](docs/screenshots/export.png) |
 
 ---
 
@@ -24,6 +40,8 @@ It's inside the folder. The first time:
 A Terminal window opens. Leave it open while you use the app. Your browser then opens the wizard.
 
 ### 3. Follow the wizard
+
+![Setup wizard](docs/setup-wizard.gif)
 
 It asks where your messages should come from:
 
@@ -59,6 +77,20 @@ To stop the app, close the Terminal window.
 - **AI summary:** optionally type a question, then click **Summarize results**. The loaded results go to Claude, plus the 3 messages around each one if that box is checked. The summary cites dates and senders. If the note says results were trimmed, narrow your search.
 
 Summaries use `claude-sonnet-5-5` by default. To change it, set `ANTHROPIC_MODEL` in the `.env` file.
+
+## Exporting a report
+
+After searching, fill in the **Export** panel and click **Export**. A report opens in a new tab. Click **Save as PDF** to keep it, or **Download spreadsheet (CSV)** for the same messages in Excel or Numbers. The report is laid out so someone else, such as a lawyer, can review it:
+
+1. **Cover page:** title, who prepared it and when, how many messages it has, date range, participants, and the search used.
+2. **Source and method:** where the messages came from (which iPhone backup, or this Mac's Messages app, and when), a SHA-256 fingerprint of the exact database copy, the time zone, and what's included or left out.
+3. **AI summary (optional):** clearly labeled as AI-generated. It has an overview, key points, a timeline, what each person said, and any gaps or ambiguities. Every point cites message numbers like `[M-0012]`, which link to the transcript.
+4. **Index of matching messages:** one line each.
+5. **Messages:** the full transcript, grouped into excerpts by conversation. Messages that matched the search are highlighted with ★, and the surrounding messages are included for context. Each message shows its reference number, the date and time to the second, the sender, the exact text, and any attachment file names.
+
+The spreadsheet uses the same reference numbers, plus each message's internal ID and GUID from the Messages database, so any line can be traced back to the source.
+
+Use Chrome for page numbers in the PDF. In the print window, turn off "Headers and footers".
 
 ---
 
@@ -129,12 +161,6 @@ Scoring: nearby hits whose context windows overlap merge into one conversation. 
 
 ---
 
-## Privacy
-
-- The app only listens on `127.0.0.1`, so other devices on your network can't reach it.
-- The only thing sent over the internet is a summary request to `api.anthropic.com`, and it contains only the messages you're summarizing.
-- `.gitignore` excludes `data/`, `output/`, all databases and CSVs, `.env`, and `categories.local.json`, so message data can't be committed by accident. Still, run `git status` before committing.
-
 ## Troubleshooting
 
 | Problem | Fix |
@@ -152,10 +178,14 @@ Scoring: nearby hits whose context windows overlap merge into one conversation. 
 
 ```
 Start iMessage Search.command   double-click launcher (sets up Python, starts app, opens browser)
+Try the Demo.command            same, with fictional demo messages (imsg/demo.py)
+scripts/launch.sh               shared launcher logic
 imsg/server.py                  local web server: wizard API, search, AI summary
 imsg/macos.py                   permissions, iPhone detection, backups, decryption, DB copies
 imsg/build_index.py             chat.db/sms.db -> data/index.sqlite (decoding, contacts, FTS5)
 imsg/categorize.py              keyword-category scoring and Markdown/CSV report
+imsg/report.py                  Export: printable report and CSV
+imsg/demo.py                    fictional demo data
 web/setup.html                  setup wizard
 web/index.html                  search page
 scripts/copy_messages_db.sh     command-line snapshot of the Mac's Messages DB
@@ -163,3 +193,26 @@ categories.example.json         sample category config
 ```
 
 Notes for developers: Messages stores dates as nanoseconds since 2001-01-01 UTC. Newer iOS and macOS versions often leave `message.text` empty and put the text in the `attributedBody` blob (an NSAttributedString typedstream), which `build_index.py` decodes. In an unencrypted backup, `sms.db` is stored as `3d/3d0d7e5fb2ce288813306e4d4636395e047a3d28`, and encrypted backups are read with [`iphone_backup_decrypt`](https://github.com/jsharkey13/iphone_backup_decrypt). Automatic backups use Apple's built-in `AppleMobileBackup` tool.
+
+## Credits
+
+iMessage Search is built on these open-source projects:
+
+| Project | Used for | License |
+|---|---|---|
+| [pytypedstream](https://github.com/dgelessus/python-typedstream) by dgelessus | Decoding message text stored in `attributedBody` | LGPL-3.0-or-later |
+| [iphone_backup_decrypt](https://github.com/jsharkey13/iphone_backup_decrypt) by James Sharkey | Reading encrypted iPhone backups | MIT |
+| [PyCryptodome](https://www.pycryptodome.org) | Cryptography behind backup decryption | BSD / Public Domain |
+| [SQLite](https://sqlite.org) and its FTS5 full-text search | Storage and search | Public Domain |
+
+These are downloaded from PyPI when you first run the app. They aren't copied into this repository, and each keeps its own license. AI summaries use [Claude](https://www.anthropic.com/claude) through the [Anthropic API](https://docs.claude.com), under your own API key and Anthropic's terms.
+
+Apple, iPhone, iMessage, Mac, macOS, and Finder are trademarks of Apple Inc. This project isn't affiliated with or endorsed by Apple or Anthropic.
+
+## Disclaimer
+
+This tool helps you find and organize your own messages. It isn't legal advice, and AI summaries can be wrong, so always check them against the messages they cite. Whether a report is accepted as evidence is up to the court or other body involved. Only use it with messages you have the right to access.
+
+## License
+
+[MIT](LICENSE) © 2026 Marian Montagnino
