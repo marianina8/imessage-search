@@ -10,7 +10,10 @@ output/
 categories.local.json
 .env
 
-# Python / macOS
+# Built app
+bin/
+
+# Python (the original version, kept until the comparison check passes)
 __pycache__/
 *.pyc
 .venv/
