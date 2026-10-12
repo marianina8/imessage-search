@@ -29,11 +29,11 @@ type Model interface {
 // FromEnv picks the model from settings in the environment (or .env).
 //
 //	AI_PROVIDER=claude   (default) uses ANTHROPIC_API_KEY and ANTHROPIC_MODEL
+//	AI_PROVIDER=ollama   uses OLLAMA_MODEL, OLLAMA_CONTEXT and OLLAMA_HOST
 func FromEnv() Model {
 	switch os.Getenv("AI_PROVIDER") {
-	// Add other providers here, e.g. a local model:
-	// case "ollama":
-	//	return NewOllama(...)
+	case "ollama":
+		return NewOllama()
 	default:
 		return NewClaude()
 	}
