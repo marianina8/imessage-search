@@ -35,7 +35,7 @@ On this page, click the green **Code** button, then **Download ZIP**. Open the d
 It's inside the folder. The first time:
 
 - If macOS says it **can't verify the developer**, click **Done**. Then open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to "Start iMessage Search". (On older macOS: right-click the file, choose **Open**, then click **Open**.)
-- If it asks to install **Command Line Tools**, click **Install**, wait for it to finish, and double-click **Start iMessage Search** again.
+- The first time, it needs **Go** to build the app. If Go isn't installed, the window tells you: download the macOS installer from [go.dev/dl](https://go.dev/dl/), open it, then double-click **Start iMessage Search** again. The first build also downloads one small library, so you need internet for that minute.
 
 A Terminal window opens. Leave it open while you use the app. Your browser then opens the wizard.
 
@@ -102,10 +102,10 @@ iPhone ──cable──▶ Finder backup (~/Library/Application Support/MobileS
    └─iCloud──▶ Messages app (~/Library/Messages/chat.db)
                       │  read-only copy
                       ▼
-                 data/chat.db ──imsg.build_index──▶ data/index.sqlite (full-text index)
+                 data/chat.db ──internal/index──▶ data/index.sqlite (full-text index)
                                                       │
-                          imsg.server: wizard, search page, AI summary (http://127.0.0.1:8765)
-                          imsg.categorize: keyword-category review report
+                          internal/server: wizard, search page, AI summary (http://127.0.0.1:8765)
+                          internal/categorize: keyword-category review report
 ```
 
 Local backups always contain the full Messages database, even when Messages in iCloud is on. The app reads copies in `data/` and never changes your Messages app or your backups.
@@ -119,12 +119,11 @@ Everything the wizard does is also available from Terminal.
 ```bash
 git clone https://github.com/marianina8/imessage-search.git ~/Code/github.com/marianina8/imessage-search
 cd ~/Code/github.com/marianina8/imessage-search
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+go build -o bin/imessage-search .              # Go 1.24 or newer
 
-./scripts/copy_messages_db.sh                 # snapshot the Mac's Messages DB into data/
-python -m imsg.build_index --me "Alex"        # build data/index.sqlite
-python -m imsg.server --open                  # start and open the browser
+./scripts/copy_messages_db.sh                  # snapshot the Mac's Messages DB into data/
+bin/imessage-search index --me "Alex"          # build data/index.sqlite
+bin/imessage-search serve --open               # start and open the browser
 ```
 
 Your terminal app needs **Full Disk Access** (System Settings → Privacy & Security → Full Disk Access). Quit and reopen it after turning that on.
@@ -132,21 +131,21 @@ Your terminal app needs **Full Disk Access** (System Settings → Privacy & Secu
 Indexer options:
 
 ```bash
-python -m imsg.build_index --db path/to/chat.db   # any chat.db or iPhone sms.db copy
-python -m imsg.build_index --list-chats           # see conversations and their chat_id
-python -m imsg.build_index --chat 5 --chat 12     # index only some conversations
-python -m imsg.build_index --no-contacts          # show raw phone numbers/emails
+bin/imessage-search index --db path/to/chat.db    # any chat.db or iPhone sms.db copy
+bin/imessage-search index --list-chats            # see conversations and their chat_id
+bin/imessage-search index --chat 5 --chat 12      # index only some conversations
+bin/imessage-search index --no-contacts           # show raw phone numbers/emails
 ```
 
 If a `contacts.sqlitedb` (iPhone Contacts from a backup) sits next to the database, names are read from it too.
 
 ### Keyword-category review
 
-For systematic reviews, such as finding every conversation about a set of topics, define categories of regex patterns with weights, and get a ranked report:
+For systematic reviews, such as finding every conversation about a set of topics, define categories of regex patterns with weights, and get a ranked report. Patterns use [Go's regular expression syntax](https://pkg.go.dev/regexp/syntax), which has no lookbehind or backreferences:
 
 ```bash
 cp categories.example.json categories.local.json   # edit your topics here (git-ignored)
-python -m imsg.categorize --config categories.local.json --chat 5 --min-score 20
+bin/imessage-search categorize --config categories.local.json --chat 5 --min-score 20
 ```
 
 This writes to `output/`:
@@ -161,6 +160,12 @@ Scoring: nearby hits whose context windows overlap merge into one conversation. 
 
 ---
 
+## Checking the Go version against the Python version
+
+This branch rewrites the app in Go. Until it's merged, the original Python code is still in `imsg/`, so the two can be compared on real messages. Double-click **Check Go vs Python**. It builds the search index twice from the same `data/chat.db`, once with each version, and compares every message: text, sender, date, conversation, attachments. It prints only counts and message ID numbers, never message text, and saves them to `data/compare-result.txt`. When it says the indexes match exactly, the Python code can be removed.
+
+From Terminal: `bin/imessage-search compare` (add `-show` to see the differing text yourself; it stays in that window).
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -172,27 +177,34 @@ Scoring: nearby hits whose context windows overlap merge into one conversation. 
 | "That password didn't unlock the backup" | Use the encrypted-backup password you set in Finder or iTunes, not your Apple Account password. If you forgot it, you can reset it on the iPhone (**Settings → General → Transfer or Reset iPhone → Reset → Reset All Settings**), then make a new backup. |
 | Old messages missing (Messages-on-Mac option) | iCloud sync isn't finished yet, or **Keep Messages** was set to 30 days or 1 year at some point. The cable option usually has more history. |
 | Names show as phone numbers | That person isn't in your Contacts. |
-| Many messages with blank text | Double-click Start again to finish installing helpers (`pytypedstream`). |
+| "This app is written in Go" | Install Go from [go.dev/dl](https://go.dev/dl/), then double-click Start again. |
 
 ## Project layout
 
 ```
-Start iMessage Search.command   double-click launcher (sets up Python, starts app, opens browser)
-Try the Demo.command            same, with fictional demo messages (imsg/demo.py)
+Start iMessage Search.command   double-click launcher (builds the app if needed, starts it, opens browser)
+Try the Demo.command            same, with fictional demo messages
+Check Go vs Python.command      compares the Go indexer with the original Python one (temporary)
 scripts/launch.sh               shared launcher logic
-imsg/server.py                  local web server: wizard API, search, AI summary
-imsg/macos.py                   permissions, iPhone detection, backups, decryption, DB copies
-imsg/build_index.py             chat.db/sms.db -> data/index.sqlite (decoding, contacts, FTS5)
-imsg/categorize.py              keyword-category scoring and Markdown/CSV report
-imsg/report.py                  Export: printable report and CSV
-imsg/demo.py                    fictional demo data
-web/setup.html                  setup wizard
-web/index.html                  search page
+main.go, compare.go             the imessage-search command and its subcommands
+internal/server                 local web server: wizard API, search, AI summary, export
+internal/ai                     the AI model behind summaries (Claude; one interface to add others)
+internal/macos                  permissions, iPhone detection, backups, DB copies
+internal/backup                 reading encrypted and unencrypted iPhone backups
+internal/index                  chat.db/sms.db -> data/index.sqlite (decoding, contacts, FTS5)
+internal/typedstream            message text stored in attributedBody
+internal/plist                  Apple property lists (binary and XML)
+internal/categorize             keyword-category scoring and Markdown/CSV report
+internal/report                 Export: printable report and CSV
+internal/demo                   fictional demo data
+web/setup.html                  setup wizard (built into the app)
+web/index.html                  search page (built into the app)
 scripts/copy_messages_db.sh     command-line snapshot of the Mac's Messages DB
 categories.example.json         sample category config
+imsg/                           the original Python version, kept until the comparison check passes
 ```
 
-Notes for developers: Messages stores dates as nanoseconds since 2001-01-01 UTC. Newer iOS and macOS versions often leave `message.text` empty and put the text in the `attributedBody` blob (an NSAttributedString typedstream), which `build_index.py` decodes. In an unencrypted backup, `sms.db` is stored as `3d/3d0d7e5fb2ce288813306e4d4636395e047a3d28`, and encrypted backups are read with [`iphone_backup_decrypt`](https://github.com/jsharkey13/iphone_backup_decrypt). Automatic backups use Apple's built-in `AppleMobileBackup` tool.
+Notes for developers: Messages stores dates as nanoseconds since 2001-01-01 UTC. Newer iOS and macOS versions often leave `message.text` empty and put the text in the `attributedBody` blob (an NSAttributedString typedstream), which `internal/typedstream` decodes. In an unencrypted backup, `sms.db` is stored as `3d/3d0d7e5fb2ce288813306e4d4636395e047a3d28`. Encrypted backups are read by `internal/backup`, which follows the same steps as [`iphone_backup_decrypt`](https://github.com/jsharkey13/iphone_backup_decrypt): the password unlocks the keybag in `Manifest.plist`, which unlocks `Manifest.db`, which holds each file's key. Automatic backups use Apple's built-in `AppleMobileBackup` tool.
 
 ## Credits
 
@@ -200,12 +212,12 @@ iMessage Search is built on these open-source projects:
 
 | Project | Used for | License |
 |---|---|---|
-| [pytypedstream](https://github.com/dgelessus/python-typedstream) by dgelessus | Decoding message text stored in `attributedBody` | LGPL-3.0-or-later |
-| [iphone_backup_decrypt](https://github.com/jsharkey13/iphone_backup_decrypt) by James Sharkey | Reading encrypted iPhone backups | MIT |
-| [PyCryptodome](https://www.pycryptodome.org) | Cryptography behind backup decryption | BSD / Public Domain |
+| [modernc.org/sqlite](https://gitlab.com/cznic/sqlite) | SQLite in pure Go, so the app is one binary | BSD-3-Clause |
 | [SQLite](https://sqlite.org) and its FTS5 full-text search | Storage and search | Public Domain |
+| [iphone_backup_decrypt](https://github.com/jsharkey13/iphone_backup_decrypt) by James Sharkey | The approach to reading encrypted backups that `internal/backup` follows (the original Python version used it directly) | MIT |
+| [pytypedstream](https://github.com/dgelessus/python-typedstream) by dgelessus | Decoding `attributedBody` in the original Python version | LGPL-3.0-or-later |
 
-These are downloaded from PyPI when you first run the app. They aren't copied into this repository, and each keeps its own license. AI summaries use [Claude](https://www.anthropic.com/claude) through the [Anthropic API](https://docs.claude.com), under your own API key and Anthropic's terms.
+modernc.org/sqlite is downloaded by Go the first time the app is built; it isn't copied into this repository. AI summaries use [Claude](https://www.anthropic.com/claude) through the [Anthropic API](https://docs.claude.com), under your own API key and Anthropic's terms.
 
 Apple, iPhone, iMessage, Mac, macOS, and Finder are trademarks of Apple Inc. This project isn't affiliated with or endorsed by Apple or Anthropic.
 

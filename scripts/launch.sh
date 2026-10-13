@@ -1,6 +1,6 @@
 #!/bin/bash
-# Shared setup for the double-click launchers: finds Python, creates .venv,
-# installs requirements when they change, then runs: python -m <args>
+# Shared setup for the double-click launchers: finds Go, builds the app when the
+# code has changed, then runs: bin/imessage-search <args>
 
 cd "$(dirname "$0")/.." || exit 1
 clear
@@ -13,36 +13,40 @@ pause_and_exit() {
   exit 1
 }
 
-# 1. Python (macOS includes it once Apple's free developer tools are installed)
-PY=""
-for candidate in python3 /usr/bin/python3 /opt/homebrew/bin/python3 /usr/local/bin/python3; do
-  if "$candidate" -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" >/dev/null 2>&1; then
-    PY="$candidate"; break
-  fi
+BIN=bin/imessage-search
+
+# 1. Go (only needed to build; skipped when a built app is already up to date)
+GO=""
+for candidate in go /opt/homebrew/bin/go /usr/local/go/bin/go /usr/local/bin/go; do
+  if command -v "$candidate" >/dev/null 2>&1; then GO="$candidate"; break; fi
 done
-if [ -z "$PY" ]; then
-  echo "This Mac needs Apple's Command Line Tools (free, about 5 minutes)."
-  echo "A window will appear: click Install, wait for it to finish,"
-  echo "then double-click 'Start iMessage Search' again."
-  xcode-select --install >/dev/null 2>&1
-  pause_and_exit
-fi
 
-# 2. A private Python environment for this app (first run only)
-if [ ! -x .venv/bin/python ]; then
-  echo "First-time setup, which takes about a minute…"
-  "$PY" -m venv .venv || { echo "Couldn't create the Python environment."; pause_and_exit; }
-fi
+needs_build() {
+  [ ! -x "$BIN" ] && return 0
+  [ -n "$(find . -path ./.git -prune -o \( -name '*.go' -o -name '*.html' -o -name go.mod -o -name go.sum \) -newer "$BIN" -print -quit)" ]
+}
 
-# 3. Helper packages (re-checked only when requirements.txt changes)
-if [ ! -f .venv/.installed ] || [ requirements.txt -nt .venv/.installed ]; then
-  echo "Installing helpers…"
-  if .venv/bin/python -m pip install -q --disable-pip-version-check -r requirements.txt; then
-    touch .venv/.installed
+if needs_build; then
+  if [ -z "$GO" ]; then
+    if [ -x "$BIN" ]; then
+      echo "(Go isn't installed, so using the app that's already built.)"
+    else
+      echo "This app is written in Go. Install Go once (free, about 2 minutes):"
+      echo "  https://go.dev/dl/   — download the macOS installer and open it."
+      echo "Then double-click this file again."
+      pause_and_exit
+    fi
   else
-    echo "(Couldn't install some helpers. Basic features still work. Check your internet and try again later.)"
+    # 2. First time: download the one helper library (pure-Go SQLite).
+    if [ ! -f go.sum ]; then
+      echo "First-time setup, which takes about a minute…"
+      "$GO" mod tidy || { echo "Couldn't download the helper library. Check your internet and try again."; pause_and_exit; }
+    fi
+    echo "Building…"
+    mkdir -p bin
+    "$GO" build -o "$BIN" . || { echo "The build failed (see above)."; pause_and_exit; }
   fi
 fi
 
-# 4. Run the app (arguments come from the .command file). Closing the window stops it.
-exec .venv/bin/python -m "$@"
+# 3. Run the app (arguments come from the .command file). Closing the window stops it.
+exec "$BIN" "$@"
