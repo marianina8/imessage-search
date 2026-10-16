@@ -204,7 +204,11 @@ async function loadMeta() {
   $("chat").innerHTML += meta.chats.map(c => `<option value="${c.chat_id}">${esc(c.label)} (${c.message_count.toLocaleString()})</option>`).join("");
   const n = senders.reduce((a, s) => a + s.n, 0);
   $("stats").textContent = `${n.toLocaleString()} messages · ${meta.chats.length} conversations · ${senders.length} senders`;
-  if (!aiEnabled) showKeyForm();
+  if (meta.ai_local) {
+    $("aiNote").textContent = aiEnabled
+      ? `Runs on ${meta.ai_name}, right here on this Mac. Nothing leaves your Mac.`
+      : meta.ai_hint;
+  } else if (!aiEnabled) showKeyForm();
 }
 
 function showKeyForm() {

@@ -168,6 +168,7 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 		status := s.setupStatus()
 		sendJSON(w, map[string]any{
 			"senders": senders(conn), "chats": chats(conn), "ai": s.Model.Ready(),
+			"ai_name": s.Model.Name(), "ai_local": isLocal(s.Model), "ai_hint": s.Model.NotReadyHint(),
 			"last_setup": status["last_setup"], "me_name": report.Meta(conn)["me_name"], "demo": s.Demo,
 		}, 200)
 	default:
@@ -727,4 +728,10 @@ func LoadDotEnv(root string) {
 			os.Setenv(k, v)
 		}
 	}
+}
+
+// isLocal reports whether summaries run on this Mac (Ollama) rather than in the cloud.
+func isLocal(m ai.Model) bool {
+	_, ok := m.(*ai.Ollama)
+	return ok
 }

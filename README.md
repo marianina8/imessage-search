@@ -1,13 +1,13 @@
 # iMessage Search
 
-Search years of iPhone text messages on your Mac by **who sent them** and **what they say**. Read each result in its conversation, get an **AI summary that cites every message**, and **export a report** you can hand to a lawyer, accountant, or family member.
+Search years of iPhone text messages on your Mac by **who sent them** and **what they say**. Read each result in its conversation, get an **AI summary that cites every message** (from Claude, or a free model running on your Mac), and **export a report** you can hand to a lawyer, accountant, or family member.
 
 ![Searching, summarizing, and exporting demo messages](docs/demo.gif)
 
 ## Privacy
 
 - **Runs entirely on your Mac.** Your messages are copied into this folder and searched here. They aren't uploaded anywhere.
-- **Nothing is uploaded unless you ask for an AI summary.** When you click *Summarize* or export with a summary, only those messages go to Anthropic's API, using your own API key. Without a key, nothing leaves your Mac.
+- **Nothing is uploaded unless you ask for an AI summary.** Search itself uses no AI. With Claude, clicking *Summarize* (or exporting with a summary) sends only those messages to Anthropic's API, using your own API key. With a [free local model](#ai-summaries-claude-or-a-free-local-model), even summaries never leave your Mac: you can turn the Wi-Fi off and it still works.
 - **Your originals are never changed.** The app reads copies of your Messages database and iPhone backup. Backup passwords aren't saved.
 - **Only you can open it.** The app runs at `127.0.0.1` (this Mac only), so other devices on your network can't see it.
 - **Your data stays out of git.** `.gitignore` excludes message databases, exports, `.env` (your API key), and personal category files.
@@ -57,7 +57,7 @@ Along the way the wizard:
 - **Finds your iPhone** as soon as it's plugged in.
 - **Backs it up** with one click. If the automatic backup doesn't work on your Mac, it shows you how to do it in Finder and notices when that finishes. You can also reuse a recent backup.
 - **Asks for your backup password** if your backups are encrypted. The password isn't saved anywhere.
-- **Offers AI summaries.** Paste an Anthropic API key to turn them on. This is optional, and you can also add it later on the search page.
+- **Offers AI summaries.** Paste an Anthropic API key to turn them on. This is optional, and you can also add it later on the search page, or use a [free local model](#ai-summaries-claude-or-a-free-local-model) instead.
 - **Builds your search** and opens it when it's done.
 
 ### Every time after that
@@ -74,9 +74,35 @@ To stop the app, close the Terminal window.
 - **Sender:** start typing a name and pick it. Add more names to include any of them.
 - **Conversation** and **date range** narrow things further.
 - **Show conversation** under a result opens the messages around it.
-- **AI summary:** optionally type a question, then click **Summarize results**. The loaded results go to Claude, plus the 3 messages around each one if that box is checked. The summary cites dates and senders. If the note says results were trimmed, narrow your search.
+- **AI summary:** optionally type a question, then click **Summarize results**. The loaded results go to your AI model, plus the 3 messages around each one if that box is checked. The summary cites dates and senders. If the note says results were trimmed, narrow your search.
 
-Summaries use `claude-sonnet-5-5` by default. To change it, set `ANTHROPIC_MODEL` in the `.env` file.
+## AI summaries: Claude or a free local model
+
+Summaries can come from either of two places. Pick one in the `.env` file in this folder (copy `.env.example` to `.env` to start), then restart **Start iMessage Search**. The note under each summary says which model wrote it.
+
+| | **Claude** (default) | **Free local model** (Ollama) |
+|---|---|---|
+| Where it runs | Anthropic's servers | This Mac. Nothing leaves it, even with the Wi-Fi off |
+| Cost | Your Anthropic API usage | Free |
+| Speed (demo summary, M1 MacBook Pro, 8 GB) | about 7.5 s | about 27 s with Granite 4.1 3B |
+| Accuracy | Best in my tests | Good, but it gets some facts wrong, so check the citations |
+| Setup | `ANTHROPIC_API_KEY=sk-ant-...` | Install [Ollama](https://ollama.com/download), run `ollama pull granite4.1:3b`, set `AI_PROVIDER=ollama` |
+
+Claude uses `claude-sonnet-5-5` by default. To change it, set `ANTHROPIC_MODEL`.
+
+### Using a free local model
+
+```bash
+# .env
+AI_PROVIDER=ollama
+OLLAMA_MODEL=granite4.1:3b     # default
+OLLAMA_CONTEXT=8192            # tokens the model reads at once (default)
+# OLLAMA_HOST=http://localhost:11434
+```
+
+The app sets the context size on every request (Ollama's own default of 4,096 silently cuts the start of longer prompts) and trims the messages it sends to fit. If a summary says results were trimmed, narrow your search. To switch back to Claude, delete the `AI_PROVIDER` line and restart.
+
+**On an 8 GB Mac,** use a small, text-only model. In my tests [Granite 4.1 3B](https://ollama.com/library/granite4.1) stayed in the yellow and ran 100% on the GPU, while Qwen 3.5 4B pushed the Mac into red memory pressure. The watchdog, scripts and every measurement are in [free-local-ai-8gb](https://github.com/marianina8/free-local-ai-8gb). With 16 GB or more you can try bigger models: change `OLLAMA_MODEL` and, if you like, raise `OLLAMA_CONTEXT`.
 
 ## Exporting a report
 
@@ -162,7 +188,7 @@ Scoring: nearby hits whose context windows overlap merge into one conversation. 
 
 ## Checking the Go version against the Python version
 
-This branch rewrites the app in Go. Until it's merged, the original Python code is still in `imsg/`, so the two can be compared on real messages. Double-click **Check Go vs Python**. It builds the search index twice from the same `data/chat.db`, once with each version, and compares every message: text, sender, date, conversation, attachments. It prints only counts and message ID numbers, never message text, and saves them to `data/compare-result.txt`. When it says the indexes match exactly, the Python code can be removed.
+The app was rewritten from Python to Go. The original Python code is still in `imsg/`, so the two can be compared on real messages. Double-click **Check Go vs Python**. It builds the search index twice from the same `data/chat.db`, once with each version, and compares every message: text, sender, date, conversation, attachments. It prints only counts and message ID numbers, never message text, and saves them to `data/compare-result.txt`. When it says the indexes match exactly, the Python code can be removed.
 
 From Terminal: `bin/imessage-search compare` (add `-show` to see the differing text yourself; it stays in that window).
 
@@ -188,7 +214,7 @@ Check Go vs Python.command      compares the Go indexer with the original Python
 scripts/launch.sh               shared launcher logic
 main.go, compare.go             the imessage-search command and its subcommands
 internal/server                 local web server: wizard API, search, AI summary, export
-internal/ai                     the AI model behind summaries (Claude; one interface to add others)
+internal/ai                     the AI model behind summaries: Claude or Ollama, behind one interface
 internal/macos                  permissions, iPhone detection, backups, DB copies
 internal/backup                 reading encrypted and unencrypted iPhone backups
 internal/index                  chat.db/sms.db -> data/index.sqlite (decoding, contacts, FTS5)
@@ -217,9 +243,9 @@ iMessage Search is built on these open-source projects:
 | [iphone_backup_decrypt](https://github.com/jsharkey13/iphone_backup_decrypt) by James Sharkey | The approach to reading encrypted backups that `internal/backup` follows (the original Python version used it directly) | MIT |
 | [pytypedstream](https://github.com/dgelessus/python-typedstream) by dgelessus | Decoding `attributedBody` in the original Python version | LGPL-3.0-or-later |
 
-modernc.org/sqlite is downloaded by Go the first time the app is built; it isn't copied into this repository. AI summaries use [Claude](https://www.anthropic.com/claude) through the [Anthropic API](https://docs.claude.com), under your own API key and Anthropic's terms.
+modernc.org/sqlite is downloaded by Go the first time the app is built; it isn't copied into this repository. AI summaries use either [Claude](https://www.anthropic.com/claude) through the [Anthropic API](https://docs.claude.com), under your own API key and Anthropic's terms, or a model you run yourself with [Ollama](https://ollama.com) (MIT), under that model's own license.
 
-Apple, iPhone, iMessage, Mac, macOS, and Finder are trademarks of Apple Inc. This project isn't affiliated with or endorsed by Apple or Anthropic.
+Apple, iPhone, iMessage, Mac, macOS, and Finder are trademarks of Apple Inc. This project isn't affiliated with or endorsed by Apple, Anthropic, Ollama or IBM.
 
 ## Disclaimer
 
